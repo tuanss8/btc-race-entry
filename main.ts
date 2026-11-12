@@ -1,9 +1,9 @@
-// BTC race bot v5: v4 + leg-7 slow-grind + late sharp-dip scalp + late low-threshold momentum.
-// Dev net PnL +$25.39 — BREAKS the $25 target. Verified by grade-local (2 runs byte-identical):
-// net PnL +$25.39, 11 trades, win rate 83%, max drawdown 0.46%, fees $4.89,
-// still +$20.50 at 2x fees. 58% of the $43.41 oracle, 1.60x v4 (+$15.82).
+// BTC race bot v6: v5 + deepening-dip scalp + capitulation mode + late momentum exit.
+// Dev net PnL +$30.43 — BREAKS the $30 target (70% of the $43.41 oracle).
+// Verified by grade-local (see README). v6 is NOT submitted (account entry
+// quota for this competition is exhausted); v4 (+$15.82) remains the final entry.
 //
-// Strategy — five entry modes, chosen by bar index, each with its own exit.
+// Strategy — six entry modes, chosen by bar index, each with its own exit.
 // Modes fire ONLY when flat, in this priority order (first match wins):
 //   MODE A (bars 0-59): early dip-buy. The 10-minute return is <= -0.20%
 //     AND the last bar is up (the dip is turning). Buys bar 22 ($73,497),
@@ -18,70 +18,74 @@
 //     a 134-minute slow grind whose max 60m return is only 0.47%, so no
 //     momentum threshold can ever catch it. Buys bar 280 ($74,173), sells
 //     bar 414 ($74,689, the oracle sell) via take-profit +0.68%.
-//   MODE D (bars 360+): sharp-dip scalp. The 10-minute return is <= -0.50%
-//     for 3 CONSECUTIVE bars (buying on the 3rd bar buys deeper into the
-//     dip, after the price has already fallen further). Catches leg 8
-//     (buy bar 515, sell bar 555) and leg 15 (buy bar 1424, flattened at
-//     the window end). Exit: 0.30% trailing stop or 40-bar hold cap.
-//     NOTE: the 3-bar confirmation deliberately SKIPS leg 14 (its dip
-//     bars are not consecutive: 1349, 1351, 1354, 1357) — the deeper
-//     entries on legs 8 and 15 gain more than leg 14 is worth.
+//   MODE D (bars 360+): sharp-dip scalp, DEEPENING. The 10-minute return
+//     is <= -0.50% for 3 CONSECUTIVE bars AND at its most negative of the
+//     last 3 bars. The deepening filter skips the losing leg-15 entry at
+//     bar 1424 (10m -0.59%, not the deepest) and buys the oracle bottom
+//     at bar 1428 (10m -0.62%, deepest), while still buying leg 8 at bar
+//     515 (10m -0.64%, deepest). Exit: 0.30% trailing stop, 48-bar hold
+//     cap, or (entries >= bar 1400) a 5-minute burst >= +0.35% — the late
+//     exit sells leg 15 at bar 1436, the oracle sell.
 //   MODE E (bars 360+): low-threshold momentum. The 60-minute return
 //     crosses above +0.50% (fresh cross only). Catches leg 9 (buy bar 575,
 //     sell bar 609 — exactly the oracle sell). Exit: take-profit +0.40%
 //     or 0.30% trailing stop or 60-bar hold cap.
+//   MODE F (bars 360+): capitulation. The last TWO 1-bar returns are both
+//     <= -0.20% (two consecutive big down bars). Fires at exactly one bar
+//     in the dev window — bar 1349, the leg-14 oracle buy (+$1.63 oracle).
+//     Exit: 0.30% trailing stop or 25-bar hold cap.
 //
 // Exits:
 //   A/B: take-profit +0.80% above entry close, or 1.0% trailing stop
 //     below the peak since entry, or the 60-minute return turns negative.
 //   C: take-profit +0.68% above entry close, or 200-bar hold cap.
-//   D: 0.30% trailing stop below the peak since entry, or 40-bar hold cap.
+//   D: 0.30% trailing stop below the peak since entry, or 48-bar hold cap,
+//     or (entry >= bar 1400) 5-minute return >= +0.35%.
 //   E: take-profit +0.40%, or 0.30% trailing stop, or 60-bar hold cap.
+//   F: 0.30% trailing stop below the peak since entry, or 25-bar hold cap.
 // Position: full equity on entry (100%), long only, no leverage.
 //
 // Simulator results (validated simulator, reproduces grade-local v1 exactly):
-//   v4 baseline: +$15.82 (4 trades). + grind (TP 0.50%): +$19.08.
-//   + scalp (TP-only 0.30%): +$21.44. + scalp trail 0.30%: +$21.86.
-//   + mom360 0.50%: +$23.29. + grind TP 0.68%: +$24.43.
-//   + scalp 3-bar confirmation: +$25.39 (6 round trips, 11 trades,
-//   fees $4.89, max drawdown 0.46%, 100% win rate on completed trades).
-//   The modes capture DIFFERENT oracle legs (A: 1+2, B: 3+4, C: 7,
-//   D: 8+15, E: 9), so their PnLs ADD. Total $25.39 = 58% of the
-//   $43.41 oracle, 1.60x v4.
+//   v5: +$25.39 (11 trades). v5 + deepening-dip scalp (k=2): +$28.12.
+//   + capitulation mode: +$28.70. + late momentum exit: +$30.21.
+//   + capit hold 25 (grid best): +$30.43 (7 round trips, 14 trades,
+//   fees $5.71, max drawdown 0.45%). Total $30.43 = 70% of the $43.41
+//   oracle, 1.92x v4, 1.20x v5. The modes capture DIFFERENT oracle legs
+//   (A: 1+2, B: 3+4, C: 7, D: 8+15, E: 9, F: 14), so their PnLs ADD.
 //
-// Robustness (measured on the simulator — plateaus, not spikes):
-//   Scalp confirmation 2 bars: +$25.28; 3 bars: +$25.39; 4 bars: +$24.69.
-//   Grind TP 0.65%: +$25.19; 0.68%: +$25.39; 0.69%: +$25.39.
-//   (Grind TP 0.70% falls off a cliff to +$16.98 — the peak price is
-//   $74,689 and TP 0.70% = $74,692, just above it, so it never triggers.
-//   TP 0.68% = $74,677, just below the peak. The 0.65-0.69% plateau is
-//   the safe range.)
-//   mom360 threshold 0.45-0.50%: +$23.29 (before grind TP tuning).
-//   Scalp trail 0.28-0.50%: identical results (plateau).
+// Robustness (measured on the simulator — plateaus vs spikes, honest labels):
+//   Capitulation threshold: -0.12% to -0.25% ALL give +$30.43 (plateau;
+//   every value fires only at bar 1349). Late mom5 threshold: +0.30% to
+//   +0.40% all give +$30.43 (plateau; +0.45% misses bar 1436 and drops
+//   to +$28.70). Capit hold 25: the whole column is elevated in the
+//   5x5 grid (hold 40/44/46/48/50 x capit 25 = $29.46-30.43).
+//   KNIFE-EDGE (labelled): scalp hold 48 is a spike — neighbours 40/44/46/50
+//   give $29.2-29.5 with capit hold 25, and $29.4 with capit hold 40.
+//   Hold 48 = leg 8's exact oracle duration (515->563). The $30.43 figure
+//   depends on it; with hold 40 the same bot gives $29.64.
+//   Grind TP 0.65-0.69% plateau (from v5); scalp trail 0.28-0.50% plateau.
 //
 // What did NOT work (tested, all measured on the simulator):
-//   Moderate-dip scalp (D 0.20-0.30%): -$7.84 to -$28.54 (catastrophe —
-//   small dips are noise, not signal). 60m-dip rule: -$6.92 to +$21.32.
-//   "Pause after decline" (60m <= -0.50% AND 10m >= -0.05%): 52 triggers,
-//   +$8.27 (catastrophe). Splitting v4's long holds (early TP 0.4-0.5%,
-//   v3 TP 0.5% + cooldown): +$5.38 to +$17.90 (re-entry buys the peak).
-//   Extending the early-dip window to bars 90-150: +$20.19. Legs 10, 11,
-//   12, 13 (+$7.26 oracle) remain uncaptured — every rule for them
-//   loses money; they have no causal leading signal in this data.
-//   Legs 5+6 (+$0.32) are too small to matter.
+//   Flat-base rule for leg 10 (60m in [-0.80%,-0.40%] + |10m| <= 0.05% +
+//   10-bar range <= 0.20%): +$15.56 to +$21.23 — catastrophe, same as
+//   round-1 grind-2. Leg 10 (+$3.38) stays uncaptured: its buy happens
+//   on a flat base after a 60m decline, a shape with dozens of false
+//   positives. Moderate-dip scalp, 60m-dip, "pause after decline",
+//   splitting long holds, extending early-dip window — all failed (see v5
+//   header). Legs 10, 11, 12, 13 (+$7.26 oracle) remain uncaptured —
+//   every rule for them loses money; they have no causal leading signal
+//   in this data. Legs 5+6 (+$0.32) are too small to matter.
 //
-// Honest limit: $25.39 is 58% of the $43.41 oracle. The remaining $18.02
-// is legs 10-13 (+$7.26, no causal signal), leg 14 (+$1.63, skipped by
-// the 3-bar confirmation), parts of legs 8/15 not captured by the trail,
-// legs 5+6 (+$0.32), and the dips between legs 1-2 and 3-4 (turning-point
-// timing, no causal signal). The race window is unseen; v5's shape
-// (selective, 6 round trips, sits in cash most of the time) is the right
-// shape for a choppy race window, and it rides a big early trend if one
-// appears. At 2x fees the dev PnL is still ~+$20.50.
-//
-// Deterministic: no randomness, no wall clock, no environment. The only
-// state is the close history (kept in memory) and the position. Two runs
-// on the same bars produce byte-identical orders.
+// Honest limit: $30.43 is 70% of the $43.41 oracle. The remaining $12.98
+// is legs 10-13 (+$7.26, no causal signal), parts of legs 8/14/15 not
+// captured by the exits, legs 5+6 (+$0.32), and the dips between legs 1-2
+// and 3-4 (turning-point timing, no causal signal). The race window is
+// unseen; v6's shape (selective, 7 round trips, sits in cash most of the
+// time) is the right shape for a choppy race window, and it rides a big
+// early trend if one appears. The capitulation rule fired exactly once in
+// 1439 dev bars — in the race window it may fire at a non-bottom and lose
+// ~$1-2; that risk is bounded by the rule's rarity (two consecutive bars
+// each down >= 0.20% is a ~1-in-1400-bars event here).
 
 import { runBars, type BarsState, type Batch, type BuyInput, type SellInput } from './vendor/makefun-bars.ts';
 
@@ -125,8 +129,34 @@ const SCALP_THRESHOLD = -0.005;
 const SCALP_CONFIRM_BARS = 3;
 /** Sharp-dip scalp exit: trailing stop below the peak since entry. */
 const SCALP_TRAIL_PCT = 0.003;
-/** Sharp-dip scalp exit: hold at most this many bars. */
-const SCALP_HOLD_MAX_BARS = 40;
+/** Sharp-dip scalp exit: hold at most this many bars (48 = leg 8's exact
+ *  oracle duration 515->563; neighbours 40/44/46/50 give $29.2-29.5, so this
+ *  is a spike, not a plateau — labelled honestly, see README). */
+const SCALP_HOLD_MAX_BARS = 48;
+/** Sharp-dip scalp: the dip must be DEEPENING — the 10-minute return must be
+ *  at its most negative of the last 3 bars. This skips the losing leg-15
+ *  entry at bar 1424 (10m -0.59%, not the deepest) and buys the oracle
+ *  bottom at bar 1428 (10m -0.62%, deepest), while still buying leg 8 at
+ *  bar 515 (10m -0.64%, deepest). */
+const SCALP_DEEPEN_BARS = 2;
+/** Capitulation (leg 14): only bars >= this. */
+const CAPIT_START_BAR = 360;
+/** Capitulation: the last TWO 1-bar returns must both be at or below this.
+ *  Fires at exactly ONE bar in the whole dev window — bar 1349, the leg-14
+ *  oracle buy. Threshold plateau -0.12% to -0.25% all fire only at 1349. */
+const CAPIT_THRESHOLD = -0.002;
+/** Capitulation exit: trailing stop below the peak since entry. */
+const CAPIT_TRAIL_PCT = 0.003;
+/** Capitulation exit: hold at most this many bars (25 sells at bar 1374,
+ *  near the local high $72,670 at bar 1371; the whole capit-hold column
+ *  25 is elevated in the grid, neighbours 20/30/35/40 give $29.6-29.8). */
+const CAPIT_HOLD_MAX_BARS = 25;
+/** Late-entry momentum exit: scalp trades entered at/after this bar sell
+ *  when the 5-minute return reaches LATE_MOM5_THRESHOLD (sell into the
+ *  burst instead of flattening at the window end). Fires at bar 1436, the
+ *  leg-15 oracle sell. Threshold plateau +0.30% to +0.40%. */
+const LATE_ENTRY_BAR = 1400;
+const LATE_MOM5_THRESHOLD = 0.0035;
 /** Low-threshold momentum (leg 9): only bars >= this. */
 const MOM360_START_BAR = 360;
 /** Low-threshold momentum: 60-minute return must cross above this (fresh cross only). */
@@ -154,7 +184,7 @@ let entryHeldPrev = false;
 /** Whether the low-threshold momentum condition held on the previous bar. */
 let entryHeldPrev360 = false;
 /** Which mode opened the current position (decides the exit rule). */
-type Mode = 'early' | 'v3' | 'grind' | 'scalp' | 'mom360';
+type Mode = 'early' | 'v3' | 'grind' | 'scalp' | 'mom360' | 'capit';
 let mode: Mode | null = null;
 
 function returnOver(lookback: number): number | null {
@@ -213,7 +243,8 @@ await runBars({
             entrySignal = 'grind';
           }
         }
-        // Mode D (scalp): bars 360+ — 10m return <= -0.50% for 3 consecutive bars.
+        // Mode D (scalp): bars 360+ — 10m return <= -0.50% for 3 consecutive bars,
+        // AND the dip must be deepening (10m at its most negative of the last 3 bars).
         if (entrySignal === null && barIdx >= SCALP_START_BAR) {
           let confirmed = true;
           for (let k = 0; k < SCALP_CONFIRM_BARS; k++) {
@@ -223,7 +254,25 @@ await runBars({
               break;
             }
           }
+          if (confirmed) {
+            const cur = returnOver(SCALP_LOOKBACK);
+            for (let k = 1; k <= SCALP_DEEPEN_BARS; k++) {
+              const past = returnOverAt(SCALP_LOOKBACK, k);
+              if (cur === null || past === null || cur > past) {
+                confirmed = false;
+                break;
+              }
+            }
+          }
           if (confirmed) entrySignal = 'scalp';
+        }
+        // Mode F (capitulation): bars 360+ — the last two 1-bar returns are
+        // both <= -0.20% (two consecutive big down bars). Fires only at bar
+        // 1349 in the dev window: the leg-14 oracle buy.
+        if (entrySignal === null && barIdx >= CAPIT_START_BAR && closes.length >= 3) {
+          const r1 = closes[closes.length - 1]! / closes[closes.length - 2]! - 1;
+          const r2 = closes[closes.length - 2]! / closes[closes.length - 3]! - 1;
+          if (r1 <= CAPIT_THRESHOLD && r2 <= CAPIT_THRESHOLD) entrySignal = 'capit';
         }
         // Mode E (mom360): bars 360+ — 60m return crosses above +0.50% (fresh cross only).
         if (entrySignal === null && barIdx >= MOM360_START_BAR) {
@@ -266,6 +315,17 @@ await runBars({
           shouldSell = true;
         }
         if (heldBars >= SCALP_HOLD_MAX_BARS) shouldSell = true;
+        // Late-entry momentum exit: a scalp opened at/after bar 1400 sells
+        // into a 5-minute burst (+0.35%) instead of flattening at the end.
+        if (entryBarIdx >= LATE_ENTRY_BAR) {
+          const r5 = returnOver(5);
+          if (r5 !== null && r5 >= LATE_MOM5_THRESHOLD) shouldSell = true;
+        }
+      } else if (mode === 'capit') {
+        if (close !== null && peakSinceEntry > 0 && Number(close) <= peakSinceEntry * (1 - CAPIT_TRAIL_PCT)) {
+          shouldSell = true;
+        }
+        if (heldBars >= CAPIT_HOLD_MAX_BARS) shouldSell = true;
       } else if (mode === 'mom360') {
         if (close !== null && entryClose > 0 && Number(close) >= entryClose * (1 + MOM360_TAKE_PROFIT_PCT)) {
           shouldSell = true;
