@@ -1,0 +1,7 @@
+{
+  "name": "btc-race-entry",
+  "version": "1.0.0",
+  "description": "Momentum trend-following bot for cbBTC 1-minute bars",
+  "license": "MIT",
+  "type": "module"
+}
