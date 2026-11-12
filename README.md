@@ -1,84 +1,61 @@
-# BTC Race Bot — Momentum Trend-Following
+# BTC Race Bot v4 — early dip-buy + momentum
 
-A trend-following bot for the make.fun bounty
-`btc-race-24h-20261112-1439` ("Race a BTC trading bot live for 24 hours").
-It trades Coinbase Wrapped BTC (cbBTC) against USDC on 1-minute bars,
-starting with $1,000 of paper money, long only, no leverage.
+**Dev net PnL +$15.82** (grade-local, 2 runs byte-identical), 4 trades, 100% win
+rate, max drawdown 0.45%, fees $1.61, still +$14.19 at 2x fees. Passes the dev
+gate with a large margin. **NOT submitted** (user ordered no submits until a
+$25+ path is found). Current submitted entry remains v2 (+$3.31).
 
 ## Strategy
 
-Three parameters, chosen for robustness rather than a sharp optimum:
+Two entry modes, chosen by bar index; one shared exit.
 
-- **Entry:** the 60-minute return crosses above **+0.65%** (fresh cross
-  only). This catches the start of a sustained up-move while filtering
-  1-minute noise.
-- **Exit:** the 60-minute return turns negative (the trend has reversed),
-  or a **1.0% trailing stop** below the highest close since entry
-  (a safety net for a sharp reversal). Whichever comes first.
-- **Position:** full equity on entry (100%), long only.
+- **Mode A (bars 0–59): dip-buy.** The 10-minute return is <= -0.20% AND the
+  last bar is up (the dip is turning). On the dev window it buys bar 22
+  ($73,497) and sells bar 56 ($74,285) via the take-profit — capturing oracle
+  legs 1+2 in one trade. It only fires in the first 60 bars, because a
+  60-minute momentum rule cannot trade there (it needs 60 bars of history).
+- **Mode B (bars 60+): v3 momentum.** The 60-minute return crosses above
+  +0.65% (fresh cross only). Same as v3: buys bar 81, sells bar 159.
+- **Exit (both modes):** take-profit +0.80% above the entry close, or a 1.0%
+  trailing stop below the peak since entry, or the 60-minute return turning
+  negative. Full equity (100%), long only, no leverage.
 
-The bot trades rarely (2 trades on the dev window), so the ~27 bps
-round-trip cost (4 bps fee + 2 bps slippage + ~7 bps price impact
-per side) does not eat the edge.
+## Why this works (and why the general dip-buy combination failed)
 
-## Why this shape
+The dev window's profit is concentrated in the first 6 hours (bars 0–360,
+7 oracle legs worth $25.02 of the $43.41 oracle). v3's 60m rule cannot trade
+before bar 60, so it misses the biggest oracle leg (+$10.84, buy bar 45, sell
+bar 56) entirely. The early dip-buy fills that gap. The two modes capture
+DIFFERENT legs (early dip: legs 1+2; momentum: legs 3+4), so their PnLs ADD:
+$15.82 = ~$8.96 (early dip) + $6.86 (v3).
 
-The dev window is a choppy, slightly falling market: BTC fell −2.30%
-over its 24 hours, with per-minute volatility of only ~5 bps. Every
-baseline loses on it:
+This is NOT the same as combining v3 with a general dip-buy — that was tested
+and FAILED (+$2.58), because a general dip-buy enters the SAME leg as v3
+(bar 71 vs 81) and then creates a losing re-entry at bar 160 (buys at the
+peak). The early dip-buy works only because it is restricted to bars < 60,
+where v3 cannot trade at all.
 
-| Baseline | Dev net PnL |
-|---|---|
-| buy-and-hold | −$25.97 |
-| momentum | −$23.31 |
-| ema-cross | −$95.88 |
-| adx-momentum | −$53.35 |
-| rsi-bollinger | −$46.52 |
-| hold-cash | $0.00 (fails the gate: no trades) |
+## Robustness
 
-Frequent trading is destroyed by the round-trip cost, so the bot must
-be selective. Variants tested on the dev window (grade-local):
+Measured on the simulator: dip lookback 10–12 min, dip threshold 0.10–0.20%,
+TP 0.6–0.9%, early window ending anywhere in bars 45–75 all give +$14.70 to
++$15.82 (plateau, not a spike). The window must end before bar 90 (bars<90
+gives +$12.54, bars<120 gives +$1.72).
 
-| Variant | Dev net PnL |
-|---|---|
-| **Momentum 60m > 0.65%, exit 60m < 0 (this bot, v2)** | **+$3.31** |
-| Momentum 60m > 0.5%, exit 60m < 0 (v1) | +$2.42 |
-| Momentum 60m > 0.55% | +$0.68 (fails at 2× fees) |
-| Momentum, exit lookback 90m | −$11.87 |
-| Mean-reversion SMA(30) dip 0.6% | −$0.92 |
-| EMA crossover + trailing stop | −$30 to −$43 |
-| Donchian breakout + trailing stop | −$5.77 |
+## Honest limit: $25 is NOT reached
 
-The perfect-hindsight oracle on this window is +$43.41 across 15 round
-trips, so $18 is mathematically possible with perfect timing — but no
-causal rule reaches it: ~250 variants were tested (short/long momentum,
-dip-buying, volatility breakout, Donchian, EMA crossover, ATR stops,
-take-profit exits, 50-100% sizing) and the best causal result is v2's
-+$3.31. The oracle's legs need knowing the exact turning point, which
-a causal bot cannot know; the 1-bar fill lag plus ~13 bps round-trip
-cost eats the edge on short moves.
-
-## Measured result (grade-local, ground truth)
-
-```
-net PnL   +3.312936 USDC
-trading   2 trades, win rate 1.00, max drawdown 0.48%,
-          exposure 9.44%, 0 rejected
-fees      0.80 USDC; at 2x fees net PnL +2.51 USDC
-guardrails met (trades ok, symbols ok, drawdown ok)
-```
-
-Two executions reproduce byte for byte (deterministic).
+v4's +$15.82 is 36% of the $43.41 oracle. The remaining oracle value is in
+leg 7 (+$4.42, a slow 134-min grind whose max 60m return is only 0.47%,
+below any momentum threshold) and legs 8–15 (+$18.39, in the falling part of
+the window where EVERY tested rule loses money: momentum, dip-buy, grid,
+deep-dip, 120m momentum, weak-momentum with a 240m filter — all negative).
+~500 strategy variants tested in total. To reach $25, a rule would need to
+capture leg 7 AND several of legs 8–15 profitably — no causal rule in this
+data does.
 
 ## Files
 
 - `main.ts` — the bot (Node 22, erasable TypeScript).
-- `vendor/makefun-bars.ts` — byte-identical copy of the kit SDK shim
-  (excluded from authorship counts).
-- `.makefun/owner.json` — claim file naming the payout wallet.
-
-## Run locally
-
-```sh
-node cli/makefun.mjs grade-local --kit <kit-dir> --bot <this-dir> --driver process
-```
+- `vendor/makefun-bars.ts` — byte-identical copy of the kit SDK shim.
+- `.makefun/owner.json` — payout wallet.
+- `LICENSE` (MIT), `package.json`, `README.md`.
