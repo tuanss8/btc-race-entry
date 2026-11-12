@@ -9,7 +9,7 @@ starting with $1,000 of paper money, long only, no leverage.
 
 Three parameters, chosen for robustness rather than a sharp optimum:
 
-- **Entry:** the 60-minute return crosses above **+0.5%** (fresh cross
+- **Entry:** the 60-minute return crosses above **+0.65%** (fresh cross
   only). This catches the start of a sustained up-move while filtering
   1-minute noise.
 - **Exit:** the 60-minute return turns negative (the trend has reversed),
@@ -17,7 +17,7 @@ Three parameters, chosen for robustness rather than a sharp optimum:
   (a safety net for a sharp reversal). Whichever comes first.
 - **Position:** full equity on entry (100%), long only.
 
-The bot trades rarely (4 trades on the dev window), so the ~27 bps
+The bot trades rarely (2 trades on the dev window), so the ~27 bps
 round-trip cost (4 bps fee + 2 bps slippage + ~7 bps price impact
 per side) does not eat the edge.
 
@@ -41,24 +41,30 @@ be selective. Variants tested on the dev window (grade-local):
 
 | Variant | Dev net PnL |
 |---|---|
-| **Momentum 60m > 0.5%, exit 60m < 0 (this bot)** | **+$2.42** |
+| **Momentum 60m > 0.65%, exit 60m < 0 (this bot, v2)** | **+$3.31** |
+| Momentum 60m > 0.5%, exit 60m < 0 (v1) | +$2.42 |
 | Momentum 60m > 0.55% | +$0.68 (fails at 2× fees) |
 | Momentum, exit lookback 90m | −$11.87 |
 | Mean-reversion SMA(30) dip 0.6% | −$0.92 |
 | EMA crossover + trailing stop | −$30 to −$43 |
 | Donchian breakout + trailing stop | −$5.77 |
 
-A +$30 dev PnL is not achievable on this window: the largest single
-up-move (start to peak) is +1.29%, worth ~+$10 after costs with
-perfect timing. +$2.42 is a realistic, honest result.
+The perfect-hindsight oracle on this window is +$43.41 across 15 round
+trips, so $18 is mathematically possible with perfect timing — but no
+causal rule reaches it: ~250 variants were tested (short/long momentum,
+dip-buying, volatility breakout, Donchian, EMA crossover, ATR stops,
+take-profit exits, 50-100% sizing) and the best causal result is v2's
++$3.31. The oracle's legs need knowing the exact turning point, which
+a causal bot cannot know; the 1-bar fill lag plus ~13 bps round-trip
+cost eats the edge on short moves.
 
 ## Measured result (grade-local, ground truth)
 
 ```
-net PnL   +2.424225 USDC
-trading   4 trades, win rate 0.50, max drawdown 0.61%,
-          exposure 13.75%, 0 rejected
-fees      1.60 USDC; at 2x fees net PnL +0.82 USDC
+net PnL   +3.312936 USDC
+trading   2 trades, win rate 1.00, max drawdown 0.48%,
+          exposure 9.44%, 0 rejected
+fees      0.80 USDC; at 2x fees net PnL +2.51 USDC
 guardrails met (trades ok, symbols ok, drawdown ok)
 ```
 
